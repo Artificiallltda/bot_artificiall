@@ -11,6 +11,7 @@ ENV/
 
 # Secrets / credentials
 credentials.json
+.env*
 .env.local
 *.pem
 *.key
