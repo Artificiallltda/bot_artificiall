@@ -36,44 +36,160 @@ class Downloader:
                 await browser.close()
 
     async def _download_freepik(self, page, url):
+        # Configurar timeout maior para downloads
+        page.set_default_timeout(90000)  # 90 segundos
+        
         logging.info(f"Acessando Freepik para download: {url}")
-        # Login
-        await page.goto("https://www.freepik.com/login")
-        # Aceitar cookies se aparecer
+        
+        # Primeiro, tentar ir direto para a URL do arquivo
+        # Se não estiver logado, o Freepik vai redirecionar para login
         try:
-            await page.click("#onetrust-accept-btn-handler", timeout=5000)
-        except:
-            pass
+            logging.info(f"Navegando para a página do arquivo: {url}")
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
-        await page.fill('input[name="email"]', self.freepik_creds['email'])
-        await page.fill('input[name="password"]', self.freepik_creds['password'])
-        await page.click('button[type="submit"]')
-        await page.wait_for_load_state("networkidle")
-
-        # Ir para a URL do arquivo
-        await page.goto(url)
+            # Aceitar cookies se aparecer
+            try:
+                await page.click("#onetrust-accept-btn-handler", timeout=5000)
+                logging.info("Cookies aceitos")
+                await page.wait_for_timeout(1000)
+            except:
+                pass
+            
+            # Verificar se precisa fazer login (verifica se está na página de login)
+            await page.wait_for_load_state("networkidle", timeout=20000)
+            current_url = page.url
+            
+            # Se está na página de login, fazer login
+            if "login" in current_url.lower() or "sign-in" in current_url.lower():
+                logging.info("Precisa fazer login, redirecionado para página de login")
+                
+                # Aceitar cookies novamente se aparecer
+                try:
+                    await page.click("#onetrust-accept-btn-handler", timeout=5000)
+                    await page.wait_for_timeout(1000)
+                except:
+                    pass
+                
+                # Clicar em "Continue with email" se aparecer
+                try:
+                    continue_email_btn = page.locator('button:has-text("Continue with email"), a:has-text("Continue with email")').first
+                    if await continue_email_btn.is_visible(timeout=5000):
+                        await continue_email_btn.click()
+                        await page.wait_for_timeout(2000)
+                        logging.info("Botão 'Continue with email' clicado")
+                except:
+                    pass
+                
+                # Preencher email e senha
+                await page.fill('input[name="email"], input[type="email"]', self.freepik_creds['email'])
+                await page.fill('input[name="password"], input[type="password"]', self.freepik_creds['password'])
+                await page.click('button[type="submit"]')
+                await page.wait_for_load_state("networkidle", timeout=20000)
+                await page.wait_for_timeout(3000)
+                
+                # Voltar para a URL do arquivo após login
+                logging.info("Login realizado, voltando para a página do arquivo")
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=30000)
+            else:
+                logging.info("Já está logado ou não precisa de login")
+            
+            await page.wait_for_timeout(2000)  # Aguardar página carregar completamente
+            logging.info("Página do arquivo carregada")
+        except Exception as e:
+            logging.error(f"Erro ao carregar página do arquivo: {e}")
+            return None
         
         # Tentar encontrar o botão de download principal
         # O Freepik muda seletores frequentemente, então usamos uma abordagem mais flexível
+        # Baseado na interface atual do Freepik, o botão pode estar no header ou na página
         download_selectors = [
+            # Botão no header (mais comum)
+            'button:has-text("Baixar")',
+            'a:has-text("Baixar")',
+            'button:has-text("Download")',
+            'a:has-text("Download")',
+            # Seletores por classe/ID
             "button.download-button",
             "button#download-file",
             "a.download-button",
-            "text=Download"
+            '[data-testid*="download"]',
+            '[class*="download"][class*="button"]',
+            'button[class*="download"]',
+            'a[class*="download"]',
+            # Seletores por atributo
+            'button[aria-label*="download" i]',
+            'a[aria-label*="download" i]',
+            'button[aria-label*="baixar" i]',
+            'a[aria-label*="baixar" i]',
+            '[href*="download"]',
+            # Seletores genéricos
+            'button:has([class*="download"])',
+            'a:has([class*="download"])',
+            # Tentar encontrar qualquer botão com texto relacionado a download
+            'header button:has-text("Download"), header button:has-text("Baixar")',
+            'nav button:has-text("Download"), nav button:has-text("Baixar")'
         ]
         
-        for selector in download_selectors:
-            btn = page.locator(selector).first
-            if await btn.is_visible():
-                async with page.expect_download() as download_info:
-                    await btn.click()
-                download = await download_info.value
-                path = os.path.join(self.download_path, download.suggested_filename)
-                await download.save_as(path)
-                logging.info(f"Download concluído: {path}")
-                return path
+        logging.info("Procurando botão de download...")
         
-        logging.error("Botão de download não encontrado no Freepik.")
+        # Primeiro, tentar encontrar botões visíveis na página
+        all_buttons = page.locator('button, a[href*="download"], a[href*="baixar"]')
+        button_count = await all_buttons.count()
+        logging.info(f"Encontrados {button_count} botões/links na página")
+        
+        # Procurar por texto "Download" ou "Baixar" em todos os elementos
+        download_texts = ['Download', 'Baixar', 'download', 'baixar', 'DESCARGAR', 'Descargar']
+        for text in download_texts:
+            try:
+                elements = page.locator(f'button:has-text("{text}"), a:has-text("{text}")')
+                count = await elements.count()
+                if count > 0:
+                    logging.info(f"Encontrado {count} elemento(s) com texto '{text}'")
+                    for i in range(count):
+                        try:
+                            elem = elements.nth(i)
+                            if await elem.is_visible(timeout=3000):
+                                logging.info(f"Tentando clicar no elemento {i+1} com texto '{text}'")
+                                async with page.expect_download(timeout=60000) as download_info:
+                                    await elem.click()
+                                download = await download_info.value
+                                path = os.path.join(self.download_path, download.suggested_filename)
+                                await download.save_as(path)
+                                logging.info(f"Download concluído: {path}")
+                                return path
+                        except Exception as e:
+                            logging.debug(f"Erro ao clicar no elemento {i+1}: {e}")
+                            continue
+            except:
+                continue
+        
+        # Se não encontrou por texto, tentar pelos seletores específicos
+        for selector in download_selectors:
+            try:
+                btn = page.locator(selector).first
+                # Aguardar o botão aparecer
+                if await btn.is_visible(timeout=5000):
+                    logging.info(f"Botão de download encontrado com seletor: {selector}")
+                    async with page.expect_download(timeout=60000) as download_info:
+                        await btn.click()
+                    download = await download_info.value
+                    path = os.path.join(self.download_path, download.suggested_filename)
+                    await download.save_as(path)
+                    logging.info(f"Download concluído: {path}")
+                    return path
+            except Exception as e:
+                logging.debug(f"Seletor {selector} não funcionou: {e}")
+                continue
+        
+        # Se não encontrou, tentar salvar screenshot para debug
+        try:
+            await page.screenshot(path="freepik_download_debug.png")
+            logging.info("Screenshot salvo em freepik_download_debug.png para análise")
+        except:
+            pass
+        
+        logging.error("Botão de download não encontrado no Freepik após tentar todos os seletores.")
         return None
 
     async def _download_envato(self, page, url):

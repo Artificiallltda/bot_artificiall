@@ -16,6 +16,7 @@ class TelegramBot:
         self.app = ApplicationBuilder().token(self.token).build()
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Ignora mensagens sem texto ou comandos
         if not update.message or not update.message.text:
             return
 
@@ -28,22 +29,29 @@ class TelegramBot:
 
         if links:
             for link in links:
-                await update.message.reply_text(f"Recebi seu link: {link}\nIniciando o processo de download...")
-                # Chama o callback que fará o download
+                # Responde no grupo que recebeu o link e está processando
+                await update.message.reply_text(
+                    f"🔍 Link detectado!\n"
+                    f"📥 Processando: {link}\n"
+                    f"⏳ Aguarde, isso pode levar alguns instantes..."
+                )
+                
+                # Chama o callback que fará o download e upload/envio
                 try:
                     result = await self.download_callback(link, update.message)
+                    # O callback já envia o arquivo ou link, então não precisamos fazer nada aqui
+                    # Apenas logamos o resultado
                     if result:
-                        if isinstance(result, str) and result.startswith('http'):
-                            # Se retornou um link (Google Drive), envia o link
-                            await update.message.reply_text(f"Aqui está o seu arquivo: {result}")
-                        else:
-                            # Se retornou um caminho de arquivo, já foi enviado pelo callback
-                            await update.message.reply_text("✅ Arquivo enviado com sucesso!")
+                        logging.info(f"Processamento concluído para {link}")
                     else:
-                        await update.message.reply_text("Desculpe, ocorreu um erro ao processar seu arquivo.")
+                        # Se result for None, o callback já deve ter enviado mensagem de erro
+                        logging.warning(f"Processamento retornou None para {link}")
                 except Exception as e:
                     logging.error(f"Erro ao processar link {link}: {e}")
-                    await update.message.reply_text(f"Erro técnico ao processar o link.")
+                    await update.message.reply_text(
+                        f"❌ Erro ao processar o link.\n"
+                        f"Tente novamente mais tarde ou verifique se o link é válido."
+                    )
 
     def run(self):
         message_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), self.handle_message)
