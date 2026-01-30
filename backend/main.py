@@ -82,6 +82,46 @@ class AutomationApp:
             logging.error(f"Erro no fluxo de processamento: {e}")
             return None
 
+    async def test_logins(self):
+        """Testa os logins do Freepik, Envato e Google Drive"""
+        results = {
+            'freepik': None,
+            'envato': None,
+            'google_drive': None
+        }
+        
+        # Testar Freepik
+        if FREEPIK_EMAIL and FREEPIK_PASSWORD:
+            try:
+                results['freepik'] = await self.downloader.test_freepik_login()
+            except Exception as e:
+                logging.error(f"Erro ao testar login do Freepik: {e}")
+                results['freepik'] = False
+        else:
+            results['freepik'] = None  # Não configurado
+        
+        # Testar Envato
+        if ENVATO_EMAIL and ENVATO_PASSWORD:
+            try:
+                results['envato'] = await self.downloader.test_envato_login()
+            except Exception as e:
+                logging.error(f"Erro ao testar login do Envato: {e}")
+                results['envato'] = False
+        else:
+            results['envato'] = None  # Não configurado
+        
+        # Testar Google Drive
+        if self.drive_service:
+            try:
+                results['google_drive'] = self.drive_service.test_connection()
+            except Exception as e:
+                logging.error(f"Erro ao testar conexão do Google Drive: {e}")
+                results['google_drive'] = False
+        else:
+            results['google_drive'] = None  # Não configurado
+        
+        return results
+    
     def run(self):
         # Inicializa o Bot do Telegram com o callback de processamento
         bot = TelegramBot(

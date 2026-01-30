@@ -70,3 +70,21 @@ class DriveService:
         except Exception as e:
             logging.error(f"Erro ao fazer upload para o Google Drive: {e}")
             return None
+    
+    def test_connection(self):
+        """Testa a conexão com o Google Drive"""
+        if not self.service:
+            return False
+        
+        try:
+            # Tenta listar os arquivos na pasta (ou apenas verificar permissões)
+            if self.folder_id:
+                # Verifica se consegue acessar a pasta
+                self.service.files().get(fileId=self.folder_id, fields='id').execute()
+            else:
+                # Se não tem pasta configurada, apenas verifica se o serviço está funcionando
+                self.service.files().list(pageSize=1).execute()
+            return True
+        except Exception as e:
+            logging.error(f"Erro ao testar conexão do Google Drive: {e}")
+            return False
