@@ -28,12 +28,17 @@ class TelegramBot:
 
         if links:
             for link in links:
-                await update.message.reply_text(f"Recebi seu link: {link}\nIniciando o processo de download e upload...")
-                # Chama o callback que fará o download e upload
+                await update.message.reply_text(f"Recebi seu link: {link}\nIniciando o processo de download...")
+                # Chama o callback que fará o download
                 try:
-                    result_link = await self.download_callback(link)
-                    if result_link:
-                        await update.message.reply_text(f"Aqui está o seu arquivo: {result_link}")
+                    result = await self.download_callback(link, update.message)
+                    if result:
+                        if isinstance(result, str) and result.startswith('http'):
+                            # Se retornou um link (Google Drive), envia o link
+                            await update.message.reply_text(f"Aqui está o seu arquivo: {result}")
+                        else:
+                            # Se retornou um caminho de arquivo, já foi enviado pelo callback
+                            await update.message.reply_text("✅ Arquivo enviado com sucesso!")
                     else:
                         await update.message.reply_text("Desculpe, ocorreu um erro ao processar seu arquivo.")
                 except Exception as e:

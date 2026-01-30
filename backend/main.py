@@ -1,13 +1,13 @@
 import asyncio
 import logging
 import os
-from config import (
+from .config import (
     TELEGRAM_TOKEN, FREEPIK_EMAIL, FREEPIK_PASSWORD,
     ENVATO_EMAIL, ENVATO_PASSWORD, DRIVE_FOLDER_ID, DOWNLOAD_PATH
 )
-from modules.bot import TelegramBot
-from modules.downloader import Downloader
-from modules.drive_service import DriveService
+from .modules.bot import TelegramBot
+from .modules.downloader import Downloader
+from .modules.drive_service import DriveService
 
 # Configuração de logs
 logging.basicConfig(
@@ -31,9 +31,11 @@ class AutomationApp:
             folder_id=DRIVE_FOLDER_ID
         )
 
-    async def process_download_and_upload(self, url):
+    async def process_download_and_upload(self, url, telegram_message=None):
         """
         Esta função é o callback que o bot chama quando recebe um link.
+        Se telegram_message for fornecido, envia o arquivo diretamente pelo Telegram.
+        Caso contrário, faz upload para o Google Drive e retorna o link.
         """
         try:
             # 1. Faz o download do arquivo
@@ -43,15 +45,38 @@ class AutomationApp:
                 logging.error(f"Falha ao baixar o arquivo da URL: {url}")
                 return None
             
-            # 2. Faz o upload para o Google Drive
-            drive_link = self.drive_service.upload_file(file_path)
+            # 2. Se temos acesso à mensagem do Telegram, envia o arquivo diretamente
+            if telegram_message:
+                try:
+                    # Envia o arquivo diretamente pelo Telegram
+                    with open(file_path, 'rb') as file:
+                        await telegram_message.reply_document(document=file)
+                    logging.info(f"Arquivo enviado pelo Telegram: {file_path}")
+                    
+                    # Remove o arquivo local após enviar
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        logging.info(f"Arquivo local removido após envio: {file_path}")
+                    
+                    return file_path  # Retorna o caminho para indicar sucesso
+                except Exception as e:
+                    logging.error(f"Erro ao enviar arquivo pelo Telegram: {e}")
+                    # Se falhar, tenta fazer upload para o Drive como fallback
             
-            # 3. Remove o arquivo local para economizar espaço
-            if drive_link and os.path.exists(file_path):
-                os.remove(file_path)
-                logging.info(f"Arquivo local removido após upload: {file_path}")
+            # 3. Faz o upload para o Google Drive (se configurado e não enviou pelo Telegram)
+            if self.drive_service and self.drive_service.service and DRIVE_FOLDER_ID:
+                drive_link = self.drive_service.upload_file(file_path)
                 
-            return drive_link
+                # Remove o arquivo local após upload
+                if drive_link and os.path.exists(file_path):
+                    os.remove(file_path)
+                    logging.info(f"Arquivo local removido após upload: {file_path}")
+                
+                return drive_link
+            else:
+                # Se não tem Google Drive configurado e não enviou pelo Telegram, retorna o caminho
+                logging.warning("Google Drive não configurado e mensagem do Telegram não fornecida. Arquivo salvo localmente.")
+                return file_path
             
         except Exception as e:
             logging.error(f"Erro no fluxo de processamento: {e}")
